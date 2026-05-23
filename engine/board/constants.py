@@ -14,6 +14,11 @@ ROOK = 4
 QUEEN = 5
 KING = 6
 
+WK = 1  # White kingside
+WQ = 2  # White queenside
+BK = 4  # Black kingside
+BQ = 8  # Black queenside
+
 
 PIECE_NAMES = {
     PAWN: "P",
@@ -40,6 +45,24 @@ UNICODE_PIECES = {
     "q": "♛",
     "k": "♚",
 }
+
+A1 = 56
+B1 = 57
+C1 = 58
+D1 = 59
+E1 = 60
+F1 = 61
+G1 = 62
+H1 = 63
+
+A8 = 0
+B8 = 1
+C8 = 2
+D8 = 3
+E8 = 4
+F8 = 5
+G8 = 6
+H8 = 7
 
 PROMOTION_PIECES = [
     QUEEN,
