@@ -17,7 +17,7 @@ def is_square_attacked(board, square, attacker_color):
     # Pawn attacks
     # =========================
 
-    pawn_direction = -1 if attacker_color == WHITE else 1
+    pawn_direction = 1 if attacker_color == WHITE else -1
 
     for df in [-1, 1]:
 
