@@ -1,11 +1,18 @@
 # engine/search/negamax.py
-
+import time
 from engine.movegen.generator import MoveGenerator
 from engine.movegen.attacks import is_square_attacked
 from engine.search.evaluation import evaluate
 from engine.board.constants import WHITE, BLACK, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, EMPTY
 from engine.board.pieces import get_piece_type, get_piece_color
 from engine.board.zobrist import SIDE_KEY
+
+# Search control variables for time management
+SEARCH_LIMIT_TIME = None
+SEARCH_START_TIME = None
+SEARCH_STOPPED = False
+nodes_searched = 0
+
 
 INF = 999999
 MATE_THRESHOLD = 990000
@@ -85,6 +92,18 @@ def _has_non_pawn_material(board, color) -> bool:
     return False
 
 def quiescence_search(board, alpha, beta) -> int:
+
+    global nodes_searched, SEARCH_STOPPED
+    nodes_searched += 1
+    
+    # Check limit every 2048 nodes
+    if nodes_searched % 2048 == 0:
+        if SEARCH_LIMIT_TIME is not None and (time.perf_counter() - SEARCH_START_TIME) >= SEARCH_LIMIT_TIME:
+            SEARCH_STOPPED = True
+            
+    if SEARCH_STOPPED:
+        return alpha
+        
     in_check = _is_in_check(board, board.side_to_move)
 
     if not in_check:
@@ -120,6 +139,18 @@ def quiescence_search(board, alpha, beta) -> int:
     return alpha
 
 def negamax(board, depth: int, alpha: int = -INF, beta: int = INF, ply: int = 0) -> int:
+
+    global nodes_searched, SEARCH_STOPPED
+    nodes_searched += 1
+    
+    # Check limit every 2048 nodes
+    if nodes_searched % 2048 == 0:
+        if SEARCH_LIMIT_TIME is not None and (time.perf_counter() - SEARCH_START_TIME) >= SEARCH_LIMIT_TIME:
+            SEARCH_STOPPED = True
+            
+    if SEARCH_STOPPED:
+        return alpha
+
     original_alpha = alpha
     in_check = _is_in_check(board, board.side_to_move)
 
@@ -141,6 +172,15 @@ def negamax(board, depth: int, alpha: int = -INF, beta: int = INF, ply: int = 0)
 
     if depth <= 0:
         return quiescence_search(board, alpha, beta)
+
+    # --- 1. Reverse Futility Pruning (RFP) ---
+    # If static evaluation is far above beta at depth 1, we can safely prune.
+    if depth == 1 and not in_check and ply > 0:
+        raw_eval = evaluate(board)
+        val = raw_eval if board.side_to_move == WHITE else -raw_eval
+        margin = 120  # ~1.2 pawns margin
+        if val - margin >= beta:
+            return val - margin  # fail-high
 
     # Null Move Pruning (skip if in check, or if side has only pawns to avoid zugzwang)
     if depth >= 3 and not in_check and ply > 0 and _has_non_pawn_material(board, board.side_to_move):
@@ -169,22 +209,35 @@ def negamax(board, depth: int, alpha: int = -INF, beta: int = INF, ply: int = 0)
         board.make_move(move)
         
         is_killer = ply < MAX_PLY and (move == killers[ply][0] or move == killers[ply][1])
-
-        # Late Move Reductions (do not reduce check evasions, promotions, killer moves, or moves that check)
-        if (
-            moves_searched >= 4 
-            and depth >= 3 
-            and not in_check 
-            and not move.captured 
-            and not move.promotion 
-            and not is_killer
-            and not _is_in_check(board, board.side_to_move)
-        ):
-            score = -negamax(board, depth - 2, -alpha - 1, -alpha, ply + 1)
-            if score > alpha:
-                score = -negamax(board, depth - 1, -beta, -alpha, ply + 1)
-        else:
+        
+        # --- 2. Principal Variation Search (PVS) & Late Move Reductions (LMR) ---
+        if moves_searched == 0:
+            # Search the first move (PV node) with full window
             score = -negamax(board, depth - 1, -beta, -alpha, ply + 1)
+        else:
+            # Non-PV node: search with a zero (null) window first
+            reduction = 0
+            if (
+                moves_searched >= 4 
+                and depth >= 3 
+                and not in_check 
+                and not move.captured 
+                and not move.promotion 
+                and not is_killer
+                and not _is_in_check(board, board.side_to_move)
+            ):
+                reduction = 1
+                
+            # Search with null window and reduction
+            score = -negamax(board, depth - 1 - reduction, -alpha - 1, -alpha, ply + 1)
+            
+            # If the search failed high (exceeded alpha) and was reduced, re-search at full depth
+            if score > alpha and reduction > 0:
+                score = -negamax(board, depth - 1, -alpha - 1, -alpha, ply + 1)
+                
+            # If it still exceeds alpha, re-search with full window [alpha, beta]
+            if score > alpha and score < beta:
+                score = -negamax(board, depth - 1, -beta, -alpha, ply + 1)
             
         board.undo_move(move)
         moves_searched += 1
