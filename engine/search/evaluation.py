@@ -103,41 +103,71 @@ def _mirror(square: int) -> int:
 
 def evaluate(board) -> int:
     score = 0
-    white_material = 0
-    black_material = 0
     
-    # Calculate material for phase detection
+    # 1. Phase calculation weights:
+    # Knight = 1, Bishop = 1, Rook = 2, Queen = 4
+    # Max phase weight = 4*1 + 4*1 + 4*2 + 2*4 = 24 (all major pieces on board)
+    phase_weight = 0
     for sq in range(64):
-        p = board.get_piece(sq)
+        p = board.squares[sq]
         if p == EMPTY: continue
-        val = PIECE_VALUES[get_piece_type(p)]
-        if get_piece_color(p) == WHITE: white_material += val
-        else: black_material += val
+        pt = get_piece_type(p)
+        if pt == KNIGHT or pt == BISHOP:
+            phase_weight += 1
+        elif pt == ROOK:
+            phase_weight += 2
+        elif pt == QUEEN:
+            phase_weight += 4
+            
+    # Clamp phase weight between 0 and 24
+    phase_weight = min(24, max(0, phase_weight))
+    # Calculate phase factor: 1.0 = Middlegame, 0.0 = Endgame
+    phase = phase_weight / 24.0
 
-    is_endgame = (white_material + black_material) < 3500
-
+    # 2. Positional and Material Evaluation
     for square in range(64):
         piece = board.get_piece(square)
         if piece == EMPTY: continue
         pt, color = get_piece_type(piece), get_piece_color(piece)
         
-        if pt == KING:
-            table = KING_ENDGAME_TABLE if is_endgame else KING_MIDDLEGAME_TABLE
-        else:
-            table = PST[pt]
-
         val = PIECE_VALUES[pt]
-        if color == WHITE: score += val + table[square]
-        else: score -= (val + table[_mirror(square)])
+        
+        if pt == KING:
+            if color == WHITE:
+                mg_val = KING_MIDDLEGAME_TABLE[square]
+                eg_val = KING_ENDGAME_TABLE[square]
+            else:
+                mg_val = KING_MIDDLEGAME_TABLE[_mirror(square)]
+                eg_val = KING_ENDGAME_TABLE[_mirror(square)]
+            pst_val = int((mg_val * phase) + (eg_val * (1.0 - phase)))
+        else:
+            if color == WHITE:
+                pst_val = PST[pt][square]
+            else:
+                pst_val = PST[pt][_mirror(square)]
+                
+        if color == WHITE:
+            score += val + pst_val
+        else:
+            score -= (val + pst_val)
 
-    # Simple King Safety
+    # 3. Tapered King Safety (Safety only matters when board is full of pieces)
     wk, bk = board.find_king(WHITE), board.find_king(BLACK)
-    if not is_endgame:
-        if wk is not None and wk >= 56:
-            for f in range(max(0, (wk%8)-1), min(8, (wk%8)+2)):
-                if board.get_piece(48+f) != make_piece(PAWN, WHITE): score -= 15
-        if bk is not None and bk <= 7:
-            for f in range(max(0, (bk%8)-1), min(8, (bk%8)+2)):
-                if board.get_piece(8+f) != make_piece(PAWN, BLACK): score += 15
+    wk_penalty = 0
+    bk_penalty = 0
+    
+    if wk is not None and wk >= 56:
+        for f in range(max(0, (wk % 8) - 1), min(8, (wk % 8) + 2)):
+            if board.get_piece(48 + f) != make_piece(PAWN, WHITE):
+                wk_penalty += 15
+                
+    if bk is not None and bk <= 7:
+        for f in range(max(0, (bk % 8) - 1), min(8, (bk % 8) + 2)):
+            if board.get_piece(8 + f) != make_piece(PAWN, BLACK):
+                bk_penalty += 15
+                
+    # Scale penalties by phase (drops to 0 as board empties)
+    score -= int(wk_penalty * phase)
+    score += int(bk_penalty * phase)
 
     return score
